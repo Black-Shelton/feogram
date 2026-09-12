@@ -1122,52 +1122,50 @@ async function doAuth(){
   const username=document.getElementById('in-username').value.trim();
   const err=document.getElementById('auth-err');
   err.textContent='';
+  const btn=document.getElementById('auth-btn');
   if(!email||!pass){err.textContent='Заполните все поля';return}
+  btn.disabled=true;btn.textContent='Загрузка...';
   if(authMode==='register'){
-    if(!username){err.textContent='Введите никнейм';return}
-    if(/[\u{1F300}-\u{1FAFF}\u{2600}-\u{27BF}]/gu.test(username)){err.textContent='Никнейм не может содержать эмодзи';return}
+    if(!username){err.textContent='Введите никнейм';btn.disabled=false;btn.textContent='Зарегистрироваться';return}
+    if(/[\u{1F300}-\u{1FAFF}\u{2600}-\u{27BF}]/gu.test(username)){err.textContent='Никнейм не может содержать эмодзи';btn.disabled=false;btn.textContent='Зарегистрироваться';return}
     const {data,error}=await sb.auth.signUp({email,password:pass,options:{data:{username}}});
-    if(error){err.textContent=error.message;return}
-    toast('Аккаунт создан! Входим...','success');
-    // Wait for DB trigger then login
-    setTimeout(async()=>{
-      const {data:sd,error:se}=await sb.auth.signInWithPassword({email,password:pass});
-      if(se){err.textContent=se.message;return}
-      currentUser=sd.user;
-      // Ensure profile exists
-      let {data:prof}=await sb.from('profiles').select('*').eq('id',currentUser.id).single();
-      if(!prof){
-        await sb.from('profiles').insert({id:currentUser.id,username:username,email:email});
-        const {data:p2}=await sb.from('profiles').select('*').eq('id',currentUser.id).single();
-        prof=p2;
-      }
-      if(!prof){err.textContent='Ошибка создания профиля';return}
-      currentProfile=prof;
-      if(currentUser.email===OWNER_EMAIL&&!prof.is_owner){
-        await sb.from('profiles').update({is_owner:true,is_admin:true}).eq('id',currentUser.id);
-        currentProfile.is_owner=true;currentProfile.is_admin=true;
-      }
-      initApp();
-    },1500);
+    if(error){err.textContent=error.message;btn.disabled=false;btn.textContent='Зарегистрироваться';return}
+    // Sign in immediately after signup
+    const {data:sd,error:se}=await sb.auth.signInWithPassword({email,password:pass});
+    if(se){err.textContent=se.message;btn.disabled=false;btn.textContent='Зарегистрироваться';return}
+    currentUser=sd.user;
+    // Create profile manually (trigger may be slow)
+    const {data:existing}=await sb.from('profiles').select('id').eq('id',currentUser.id).single();
+    if(!existing){
+      await sb.from('profiles').insert({id:currentUser.id,username:username,email:email,coins:100});
+    }
+    await finishLogin(btn);
   } else {
-    loginDo(email,pass);
+    await loginDo(email,pass,btn);
   }
 }
-async function loginDo(email,pass){
+async function loginDo(email,pass,btn){
+  if(!btn){btn=document.getElementById('auth-btn');btn.disabled=true;btn.textContent='Загрузка...';}
   const err=document.getElementById('auth-err');
   const {data,error}=await sb.auth.signInWithPassword({email,password:pass});
-  if(error){err.textContent=error.message;return}
+  if(error){err.textContent=error.message;btn.disabled=false;btn.textContent='Войти';return}
   currentUser=data.user;
-  // Ensure profile exists
-  let {data:prof}=await sb.from('profiles').select('*').eq('id',currentUser.id).single();
+  await finishLogin(btn);
+}
+async function finishLogin(btn){
+  const err=document.getElementById('auth-err');
+  const {data:prof}=await sb.from('profiles').select('*').eq('id',currentUser.id).single();
   if(!prof){
+    // Last resort: create profile
     const uname=currentUser.email.split('@')[0];
-    await sb.from('profiles').insert({id:currentUser.id,username:uname,email:currentUser.email});
+    await sb.from('profiles').insert({id:currentUser.id,username:uname,email:currentUser.email,coins:100});
     const {data:p2}=await sb.from('profiles').select('*').eq('id',currentUser.id).single();
-    prof=p2;
+    if(!p2){err.textContent='Ошибка профиля. Попробуй ещё раз.';btn.disabled=false;btn.textContent='Войти';return}
+    currentProfile=p2;
+  } else {
+    currentProfile=prof;
   }
-  if(!prof){err.textContent='Профиль не найден';return}
-  currentProfile=prof;
+  btn.disabled=false;btn.textContent=authMode==='login'?'Войти':'Зарегистрироваться';
   await loadProfile();
 }
 async function loadProfile(){
