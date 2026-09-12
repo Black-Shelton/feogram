@@ -5,7 +5,8 @@
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
 <title>FeoGram</title>
 <link href="https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700&family=Playfair+Display:wght@700;900&display=swap" rel="stylesheet">
-<script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2">
+<script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2"></script>
+<script>
 // ══════════════════════════════════════════
 // EDIT PROFILE
 // ══════════════════════════════════════════
@@ -1124,36 +1125,49 @@ async function doAuth(){
   if(!email||!pass){err.textContent='Заполните все поля';return}
   if(authMode==='register'){
     if(!username){err.textContent='Введите никнейм';return}
-    // Check emoji in username
     if(/[\u{1F300}-\u{1FAFF}\u{2600}-\u{27BF}]/gu.test(username)){err.textContent='Никнейм не может содержать эмодзи';return}
     const {data,error}=await sb.auth.signUp({email,password:pass,options:{data:{username}}});
     if(error){err.textContent=error.message;return}
-    toast('Аккаунт создан! Выполняем вход...','success');
-    // Wait for trigger to create profile then login
-    let tries=0;
-    const tryLogin=async()=>{
-      tries++;
-      const res=await sb.auth.signInWithPassword({email,password:pass});
-      if(res.error){document.getElementById('auth-err').textContent=res.error.message;return}
-      currentUser=res.data.user;
-      // Check if profile exists, if not create it
-      const {data:prof}=await sb.from('profiles').select('*').eq('id',currentUser.id).single();
+    toast('Аккаунт создан! Входим...','success');
+    // Wait for DB trigger then login
+    setTimeout(async()=>{
+      const {data:sd,error:se}=await sb.auth.signInWithPassword({email,password:pass});
+      if(se){err.textContent=se.message;return}
+      currentUser=sd.user;
+      // Ensure profile exists
+      let {data:prof}=await sb.from('profiles').select('*').eq('id',currentUser.id).single();
       if(!prof){
-        if(tries<5){setTimeout(tryLogin,800);return}
-        // Force create profile
-        await sb.from('profiles').insert({id:currentUser.id,username,email});
+        await sb.from('profiles').insert({id:currentUser.id,username:username,email:email});
+        const {data:p2}=await sb.from('profiles').select('*').eq('id',currentUser.id).single();
+        prof=p2;
       }
-      await loadProfile();
-    };
-    setTimeout(tryLogin,1000);
+      if(!prof){err.textContent='Ошибка создания профиля';return}
+      currentProfile=prof;
+      if(currentUser.email===OWNER_EMAIL&&!prof.is_owner){
+        await sb.from('profiles').update({is_owner:true,is_admin:true}).eq('id',currentUser.id);
+        currentProfile.is_owner=true;currentProfile.is_admin=true;
+      }
+      initApp();
+    },1500);
   } else {
     loginDo(email,pass);
   }
 }
 async function loginDo(email,pass){
+  const err=document.getElementById('auth-err');
   const {data,error}=await sb.auth.signInWithPassword({email,password:pass});
-  if(error){document.getElementById('auth-err').textContent=error.message;return}
+  if(error){err.textContent=error.message;return}
   currentUser=data.user;
+  // Ensure profile exists
+  let {data:prof}=await sb.from('profiles').select('*').eq('id',currentUser.id).single();
+  if(!prof){
+    const uname=currentUser.email.split('@')[0];
+    await sb.from('profiles').insert({id:currentUser.id,username:uname,email:currentUser.email});
+    const {data:p2}=await sb.from('profiles').select('*').eq('id',currentUser.id).single();
+    prof=p2;
+  }
+  if(!prof){err.textContent='Профиль не найден';return}
+  currentProfile=prof;
   await loadProfile();
 }
 async function loadProfile(){
