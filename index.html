@@ -1128,8 +1128,24 @@ async function doAuth(){
     if(/[\u{1F300}-\u{1FAFF}\u{2600}-\u{27BF}]/gu.test(username)){err.textContent='Никнейм не может содержать эмодзи';return}
     const {data,error}=await sb.auth.signUp({email,password:pass,options:{data:{username}}});
     if(error){err.textContent=error.message;return}
-    toast('Аккаунт создан!','success');
-    setTimeout(()=>loginDo(email,pass),900);
+    toast('Аккаунт создан! Выполняем вход...','success');
+    // Wait for trigger to create profile then login
+    let tries=0;
+    const tryLogin=async()=>{
+      tries++;
+      const res=await sb.auth.signInWithPassword({email,password:pass});
+      if(res.error){document.getElementById('auth-err').textContent=res.error.message;return}
+      currentUser=res.data.user;
+      // Check if profile exists, if not create it
+      const {data:prof}=await sb.from('profiles').select('*').eq('id',currentUser.id).single();
+      if(!prof){
+        if(tries<5){setTimeout(tryLogin,800);return}
+        // Force create profile
+        await sb.from('profiles').insert({id:currentUser.id,username,email});
+      }
+      await loadProfile();
+    };
+    setTimeout(tryLogin,1000);
   } else {
     loginDo(email,pass);
   }
